@@ -43,6 +43,13 @@
   .month-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
   .month-label { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 13px; letter-spacing: 0.1em; text-transform: uppercase; }
   .month-nav { display: flex; gap: 6px; }
+  .type-filter { display: flex; gap: 6px; margin-bottom: 18px; }
+  .type-filter-btn {
+    flex: 1; padding: 8px 6px; border: 2px solid var(--ink); border-radius: 10px; background: var(--paper);
+    color: var(--ink); font-family: 'Plus Jakarta Sans', sans-serif; font-weight: 600; font-size: 12.5px;
+    cursor: pointer; transition: background 0.12s, color 0.12s;
+  }
+  .type-filter-btn.active { background: var(--ink); color: #fff; }
   .icon-btn {
     background: var(--paper); border: 2px solid var(--ink); cursor: pointer; color: var(--ink);
     padding: 5px; display: flex; align-items: center; border-radius: 50%;
@@ -105,6 +112,14 @@
   .cat-bar-fill { height: 100%; border-radius: 20px 0 0 20px; }
   .cat-bar-amt { font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 12.5px; width: 78px; text-align: right; flex-shrink: 0; }
 
+  .pay-table { width: 100%; border-collapse: collapse; }
+  .pay-table td { padding: 8px 0; font-size: 13px; border-bottom: 1px solid var(--accent-soft); }
+  .pay-table tr:last-child td { border-bottom: none; }
+  .pay-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 8px; vertical-align: middle; border: 1px solid var(--ink); }
+  .pay-count { text-align: right; color: var(--ink-soft); font-size: 11px; font-weight: 500; width: 50px; }
+  .pay-pct { text-align: right; color: var(--ink-soft); font-size: 12px; font-weight: 600; width: 50px; }
+  .pay-amt { text-align: right; font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 12.5px; width: 90px; }
+
   .empty-note { font-size: 13px; color: var(--ink-soft); padding: 10px 0; }
 
   .row {
@@ -151,6 +166,9 @@
     { name: "Salaries", color: "#3D5A80" },
     { name: "Other", color: "#6C757D" }
   ];
+  var PAYMENT_METHODS = ["Cash", "UPI", "Credit Card", "Other"];
+  var PAYMENT_COLORS = { "Cash": "#FB8500", "UPI": "#219EBC", "Credit Card": "#8338EC", "Other": "#6C757D" };
+  var TYPES = ["Personal", "Home", "Other"];
   var MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
   var STORAGE_KEY = "expense_tracker_entries";
 
@@ -202,7 +220,8 @@
     viewDate: new Date(),
     formOpen: false,
     noteError: false,
-    confirmDeleteId: null
+    confirmDeleteId: null,
+    filterType: "All"
   };
 
   function monthExpenses() {
@@ -210,7 +229,9 @@
     return state.expenses
       .filter(function (e) {
         var d = new Date(e.date);
-        return d.getFullYear() === y && d.getMonth() === m;
+        var inMonth = d.getFullYear() === y && d.getMonth() === m;
+        var matchesType = state.filterType === "All" || e.type === state.filterType;
+        return inMonth && matchesType;
       })
       .sort(function (a, b) { return a.date < b.date ? 1 : -1; });
   }
@@ -226,6 +247,21 @@
       .sort(function (a, b) { return b.total - a.total; });
   }
 
+  function paymentBreakdown(list) {
+    var map = {}, count = {};
+    PAYMENT_METHODS.forEach(function (p) { map[p] = 0; count[p] = 0; });
+    list.forEach(function (e) {
+      var p = e.payment || "Cash";
+      map[p] = (map[p] || 0) + Number(e.amount);
+      count[p] = (count[p] || 0) + 1;
+    });
+    var total = list.reduce(function (s, e) { return s + Number(e.amount); }, 0);
+    return PAYMENT_METHODS
+      .map(function (p) { return { name: p, color: PAYMENT_COLORS[p], total: map[p], count: count[p], pct: total > 0 ? (map[p] / total) * 100 : 0 }; })
+      .filter(function (p) { return p.total > 0; })
+      .sort(function (a, b) { return b.total - a.total; });
+  }
+
   function isCurrentMonth() {
     var now = new Date();
     return state.viewDate.getFullYear() === now.getFullYear() && state.viewDate.getMonth() === now.getMonth();
@@ -234,13 +270,14 @@
   function esc(s) {
     var div = document.createElement("div");
     div.textContent = s == null ? "" : String(s);
-    return div.innerHTML;
+    return div.innerHTML.replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
 
   function render() {
     var list = monthExpenses();
     var total = list.reduce(function (s, e) { return s + Number(e.amount); }, 0);
     var breakdown = categoryBreakdown(list);
+    var payBreakdown = paymentBreakdown(list);
     var monthLabel = MONTH_NAMES[state.viewDate.getMonth()] + " " + state.viewDate.getFullYear();
 
     var html = "";
@@ -255,7 +292,7 @@
 
     html += '<div class="total-block">';
     html += '  <div class="total-amount">' + inr(total) + '</div>';
-    html += '  <div class="total-sub">' + list.length + (list.length === 1 ? ' expense' : ' expenses') + ' this month</div>';
+    html += '  <div class="total-sub">' + list.length + (list.length === 1 ? ' expense' : ' expenses') + ' this month' + (state.filterType !== "All" ? ' &middot; ' + esc(state.filterType) : '') + '</div>';
     html += '</div>';
 
     if (!state.formOpen) {
@@ -263,6 +300,13 @@
     } else {
       html += renderForm();
     }
+
+    html += '<div class="section-label">Viewing</div>';
+    html += '<div class="type-filter">';
+    ["All"].concat(TYPES).forEach(function (t) {
+      html += '<button type="button" class="type-filter-btn' + (state.filterType === t ? ' active' : '') + '" data-action="filter-type" data-type="' + t + '">' + t + '</button>';
+    });
+    html += '</div>';
 
     if (breakdown.length > 0) {
       html += '<div class="section-label">By category</div>';
@@ -273,6 +317,20 @@
         html += '  <span class="cat-bar-amt">' + inr(c.total) + '</span>';
         html += '</div>';
       });
+    }
+
+    if (payBreakdown.length > 0) {
+      html += '<div class="section-label">By payment method</div>';
+      html += '<table class="pay-table"><tbody>';
+      payBreakdown.forEach(function (p) {
+        html += '<tr>';
+        html += '  <td><span class="pay-dot" style="background:' + p.color + '"></span>' + esc(p.name) + '</td>';
+        html += '  <td class="pay-count">' + p.count + (p.count === 1 ? ' txn' : ' txns') + '</td>';
+        html += '  <td class="pay-pct">' + p.pct.toFixed(0) + '%</td>';
+        html += '  <td class="pay-amt">' + inr(p.total) + '</td>';
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
     }
 
     html += '<div class="section-label">Entries</div>';
@@ -286,7 +344,7 @@
         html += '  <div class="row-tick" style="background:' + catColor(e.category) + '"></div>';
         html += '  <div class="row-main">';
         html += '    <div class="row-note">' + esc(e.note || e.category) + '</div>';
-        html += '    <div class="row-meta">' + dateLabel + ' &middot; ' + esc(e.category) + '</div>';
+        html += '    <div class="row-meta">' + dateLabel + ' &middot; ' + esc(e.category) + ' &middot; ' + esc(e.payment || "Cash") + ' &middot; ' + esc(e.type || "Personal") + '</div>';
         html += '  </div>';
         html += '  <div class="row-amount">' + inr(e.amount) + '</div>';
         html += '  <button class="row-delete' + (isConfirm ? ' confirm' : '') + '" data-action="delete" data-id="' + e.id + '" aria-label="Delete entry">' + ICONS.trash + '</button>';
@@ -300,8 +358,13 @@
     attachFormHandlers();
   }
 
+  function noteRequired(vals) {
+    return vals.category === "Other" || vals.payment === "Other" || vals.type === "Other";
+  }
+
   function renderForm() {
-    var f = state.formValues || { amount: "", category: CATEGORIES[0].name, note: "", date: todayStr() };
+    var f = state.formValues || { amount: "", category: CATEGORIES[0].name, note: "", date: todayStr(), payment: PAYMENT_METHODS[0], type: TYPES[0] };
+    var required = noteRequired(f);
     var html = '<form class="add-form" id="expense-form">';
     html += '  <div class="field-row">';
     html += '    <div class="field" style="flex:0 0 120px">';
@@ -313,18 +376,36 @@
     html += '      <input id="f-date" type="date" value="' + esc(f.date) + '" />';
     html += '    </div>';
     html += '  </div>';
-    html += '  <div class="field">';
-    html += '    <label for="f-category">Category</label>';
-    html += '    <select id="f-category" style="border-left:4px solid ' + catColor(f.category) + '">';
+    html += '  <div class="field-row">';
+    html += '    <div class="field">';
+    html += '      <label for="f-category">Category</label>';
+    html += '      <select id="f-category" style="border-left:4px solid ' + catColor(f.category) + '">';
     CATEGORIES.forEach(function (c) {
       html += '<option value="' + c.name + '"' + (c.name === f.category ? ' selected' : '') + '>' + c.name + '</option>';
+    });
+    html += '      </select>';
+    html += '    </div>';
+    html += '    <div class="field">';
+    html += '      <label for="f-payment">Payment</label>';
+    html += '      <select id="f-payment">';
+    PAYMENT_METHODS.forEach(function (p) {
+      html += '<option value="' + p + '"' + (p === f.payment ? ' selected' : '') + '>' + p + '</option>';
+    });
+    html += '      </select>';
+    html += '    </div>';
+    html += '  </div>';
+    html += '  <div class="field">';
+    html += '    <label for="f-type">Type</label>';
+    html += '    <select id="f-type">';
+    TYPES.forEach(function (t) {
+      html += '<option value="' + t + '"' + (t === f.type ? ' selected' : '') + '>' + t + '</option>';
     });
     html += '    </select>';
     html += '  </div>';
     html += '  <div class="field">';
-    html += '    <label for="f-note">Note' + (f.category === "Other" ? ' (required)' : '') + '</label>';
-    html += '    <input id="f-note" type="text" placeholder="' + (f.category === "Other" ? "What was it for?" : "What was it for? (optional)") + '" value="' + esc(f.note) + '"' + (state.noteError ? ' style="border-color:var(--brick)"' : '') + ' />';
-    if (state.noteError) html += '    <span class="field-error">A note is required for &quot;Other&quot;.</span>';
+    html += '    <label for="f-note">Note' + (required ? ' (required)' : '') + '</label>';
+    html += '    <input id="f-note" type="text" placeholder="' + (required ? "What was it for?" : "What was it for? (optional)") + '" value="' + esc(f.note) + '"' + (state.noteError ? ' style="border-color:var(--brick)"' : '') + ' />';
+    if (state.noteError) html += '    <span class="field-error">A note is required when Category, Payment, or Type is &quot;Other&quot;.</span>';
     html += '  </div>';
     html += '  <button type="submit" class="submit-btn">Save</button>';
     html += '</form>';
@@ -334,26 +415,26 @@
   function attachFormHandlers() {
     var form = document.getElementById("expense-form");
     if (!form) return;
-    var categorySelect = document.getElementById("f-category");
-    categorySelect.addEventListener("change", function () {
-      state.formValues = readFormValues();
-      state.formValues.category = categorySelect.value;
-      if (categorySelect.value !== "Other") state.noteError = false;
-      render();
-      document.getElementById("f-category").focus();
+    ["f-category", "f-payment", "f-type"].forEach(function (id) {
+      document.getElementById(id).addEventListener("change", function () {
+        state.formValues = readFormValues();
+        if (!noteRequired(state.formValues)) state.noteError = false;
+        render();
+        document.getElementById(id).focus();
+      });
     });
     form.addEventListener("submit", function (ev) {
       ev.preventDefault();
       var vals = readFormValues();
       var amt = parseFloat(vals.amount);
       if (!amt || amt <= 0) return;
-      if (vals.category === "Other" && !vals.note.trim()) {
+      if (noteRequired(vals) && !vals.note.trim()) {
         state.formValues = vals;
         state.noteError = true;
         render();
         return;
       }
-      var entry = { id: uid(), amount: amt, category: vals.category, note: vals.note.trim(), date: vals.date };
+      var entry = { id: uid(), amount: amt, category: vals.category, payment: vals.payment, type: vals.type, note: vals.note.trim(), date: vals.date };
       state.expenses = [entry].concat(state.expenses);
       saveExpenses(state.expenses);
       state.formOpen = false;
@@ -368,28 +449,53 @@
     return {
       amount: document.getElementById("f-amount").value,
       category: document.getElementById("f-category").value,
+      payment: document.getElementById("f-payment").value,
+      type: document.getElementById("f-type").value,
       note: document.getElementById("f-note").value,
       date: document.getElementById("f-date").value
     };
   }
 
+  function categoryTotalsFor(list) {
+    var map = {};
+    list.forEach(function (e) { map[e.category] = (map[e.category] || 0) + Number(e.amount); });
+    return map;
+  }
+
   function exportExcel() {
     var sorted = state.expenses.slice().sort(function (a, b) { return a.date < b.date ? -1 : 1; });
-    var entriesData = [["Date", "Category", "Note", "Amount (INR)"]];
-    sorted.forEach(function (e) { entriesData.push([e.date, e.category, e.note || "", e.amount]); });
-    var entriesSheet = XLSX.utils.aoa_to_sheet(entriesData);
-    entriesSheet["!cols"] = [{ wch: 12 }, { wch: 16 }, { wch: 30 }, { wch: 14 }];
-
-    var summaryMap = {};
-    sorted.forEach(function (e) { summaryMap[e.category] = (summaryMap[e.category] || 0) + Number(e.amount); });
-    var grandTotal = sorted.reduce(function (s, e) { return s + Number(e.amount); }, 0);
-    var summaryData = [["Category", "Total (INR)"]];
-    CATEGORIES.forEach(function (c) {
-      if (summaryMap[c.name]) summaryData.push([c.name, summaryMap[c.name]]);
+    var entriesData = [["Date", "Month", "Category", "Payment", "Type", "Note", "Amount (INR)"]];
+    sorted.forEach(function (e) {
+      var d = new Date(e.date);
+      var monthLabel = MONTH_NAMES[d.getMonth()] + " " + d.getFullYear();
+      entriesData.push([e.date, monthLabel, e.category, e.payment || "Cash", e.type || "Personal", e.note || "", e.amount]);
     });
-    summaryData.push(["Grand Total", grandTotal]);
+    var entriesSheet = XLSX.utils.aoa_to_sheet(entriesData);
+    entriesSheet["!cols"] = [{ wch: 12 }, { wch: 14 }, { wch: 16 }, { wch: 14 }, { wch: 12 }, { wch: 30 }, { wch: 14 }];
+
+    var summaryData = [];
+    var sections = ["All"].concat(TYPES);
+    sections.forEach(function (sec, idx) {
+      var subset = sec === "All" ? sorted : sorted.filter(function (e) { return (e.type || "Personal") === sec; });
+      var map = categoryTotalsFor(subset);
+      var grand = subset.reduce(function (s, e) { return s + Number(e.amount); }, 0);
+      if (idx > 0) summaryData.push([]);
+      summaryData.push([sec.toUpperCase() + " — By Category", ""]);
+      summaryData.push(["Category", "Total (INR)"]);
+      CATEGORIES.forEach(function (c) {
+        if (map[c.name]) summaryData.push([c.name, map[c.name]]);
+      });
+      summaryData.push(["Grand Total", grand]);
+    });
+
+    summaryData.push([]);
+    summaryData.push(["ALL — By Payment Method", ""]);
+    summaryData.push(["Payment Method", "Total (INR)"]);
+    var payBreakdownAll = paymentBreakdown(sorted);
+    payBreakdownAll.forEach(function (p) { summaryData.push([p.name, p.total]); });
+
     var summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
-    summarySheet["!cols"] = [{ wch: 16 }, { wch: 14 }];
+    summarySheet["!cols"] = [{ wch: 22 }, { wch: 14 }];
 
     var wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, entriesSheet, "All Entries");
@@ -414,6 +520,9 @@
       state.formOpen = true;
       state.formValues = null;
       state.noteError = false;
+      render();
+    } else if (action === "filter-type") {
+      state.filterType = btn.getAttribute("data-type");
       render();
     } else if (action === "delete") {
       var id = btn.getAttribute("data-id");
