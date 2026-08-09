@@ -403,9 +403,9 @@
     html += '    </select>';
     html += '  </div>';
     html += '  <div class="field">';
-    html += '    <label for="f-note">Note' + (required ? ' (required)' : '') + '</label>';
+    html += '    <label for="f-note" id="f-note-label">Note' + (required ? ' (required)' : '') + '</label>';
     html += '    <input id="f-note" type="text" placeholder="' + (required ? "What was it for?" : "What was it for? (optional)") + '" value="' + esc(f.note) + '"' + (state.noteError ? ' style="border-color:var(--brick)"' : '') + ' />';
-    if (state.noteError) html += '    <span class="field-error">A note is required when Category, Payment, or Type is &quot;Other&quot;.</span>';
+    if (state.noteError) html += '    <span class="field-error" id="f-note-error">A note is required when Category, Payment, or Type is &quot;Other&quot;.</span>';
     html += '  </div>';
     html += '  <button type="submit" class="submit-btn">Save</button>';
     html += '</form>';
@@ -418,9 +418,7 @@
     ["f-category", "f-payment", "f-type"].forEach(function (id) {
       document.getElementById(id).addEventListener("change", function () {
         state.formValues = readFormValues();
-        if (!noteRequired(state.formValues)) state.noteError = false;
-        render();
-        document.getElementById(id).focus();
+        updateFormReactiveBits();
       });
     });
     form.addEventListener("submit", function (ev) {
@@ -443,6 +441,29 @@
       render();
     });
     document.getElementById("f-amount").focus();
+  }
+
+  // Updates the small reactive bits of the open form (category color bar,
+  // note required label/placeholder) WITHOUT rebuilding the form's HTML.
+  // Rebuilding the DOM mid-selection is what caused iOS's native picker
+  // to need two taps to register a choice.
+  function updateFormReactiveBits() {
+    var vals = readFormValues();
+    var catSelect = document.getElementById("f-category");
+    if (catSelect) catSelect.style.borderLeft = "4px solid " + catColor(vals.category);
+
+    var required = noteRequired(vals);
+    var noteLabel = document.getElementById("f-note-label");
+    var noteInput = document.getElementById("f-note");
+    if (noteLabel) noteLabel.textContent = "Note" + (required ? " (required)" : "");
+    if (noteInput) noteInput.placeholder = required ? "What was it for?" : "What was it for? (optional)";
+
+    if (!required && state.noteError) {
+      state.noteError = false;
+      if (noteInput) noteInput.style.borderColor = "";
+      var errorSpan = document.getElementById("f-note-error");
+      if (errorSpan) errorSpan.remove();
+    }
   }
 
   function readFormValues() {
